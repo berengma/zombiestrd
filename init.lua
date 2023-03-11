@@ -146,28 +146,6 @@ local function zombie_brain(self)
 	end
 end
 
-local function shark_brain(self)
-	if mobkit.timer(self,1) then lava_dmg(self,6) end
---	mobkit.vitals(self)
-	
-	if self.hp <= 0 then	
-		mobkit.clear_queue_high(self)
-		mobkit.hq_die(self)
-		return
-	end
-	
-	if mobkit.timer(self,1) then
-		local prty = mobkit.get_queue_priority(self)
-		if prty < 20 then
-			local target = mobkit.get_nearby_player(self)
-			if target and mobkit.is_alive(target) and mobkit.is_in_deep(target) and target:get_attach() == nil then
-				mobkit.clear_queue_high(self)
-				mobkit.hq_aqua_attack(self,20,target,7)
-			end
-		end
-	end
-	if mobkit.is_queue_empty_high(self) then mobkit.hq_aqua_roam(self,10,5) end
-end
 -- spawning is too specific to be included in the api, this is an example.
 -- a modder will want to refer to specific names according to games/mods they're using 
 -- in order for mobs not to spawn on treetops, certain biomes etc.
@@ -200,38 +178,20 @@ local function spawnstep(dtime)
 				local wcnt=0
 				local dcnt=0
 				local mobname = 'zombiestrd:zombie'
-				if liquidflag then		-- sharks
-					local spnode = mobkit.nodeatpos({x=pos2.x,y=height+0.01,z=pos2.z})
-					local spnode2 = mobkit.nodeatpos({x=pos2.x,y=height+1.01,z=pos2.z}) -- node above to make sure won't spawn in shallows
-					nodename_water = nodename_water or minetest.registered_aliases.mapgen_water_source
-					if spnode and spnode2 and spnode.name == nodename_water and spnode2.name == nodename_water then
-						for _,obj in ipairs(objs) do
-							if not obj:is_player() then
-								local entity = obj:get_luaentity()
-								if entity and entity.name=='zombiestrd:shark' then return end
-							end
-						end
-					mobname = 'zombiestrd:shark'
-					else
+				if liquidflag  or height < -100 then
 						return
-					end
-					
-				elseif height >= 0 then		--zombies
-					for _,obj in ipairs(objs) do				-- count mobs in abrange
-						if not obj:is_player() then
-							local entity = obj:get_luaentity()
-							if entity and entity.name:find('zombiestrd:') then
-								chance=chance + (1-chance)*spawn_reduction	-- chance reduced for every mob in range
-							end
+				end
+				for _,obj in ipairs(objs) do				-- count mobs in abrange
+					if not obj:is_player() then
+						local entity = obj:get_luaentity()
+						if entity and entity.name:find('zombiestrd:') then
+							chance=chance + (1-chance)*spawn_reduction	-- chance reduced for every mob in range
 						end
 					end
 				end
 				if chance < random() then
 					pos2.y = height+1.01
 					objs = minetest.get_objects_inside_radius(pos2,abr*16-2)
-					for _,obj in ipairs(objs) do				-- do not spawn if another player around
-						if obj:is_player() then return end
-					end
 					local obj=minetest.add_entity(pos2,mobname)			-- ok spawn it already damnit
 				end
 			end
@@ -248,7 +208,7 @@ minetest.register_globalstep(spawnstep)
 
 minetest.register_on_punchnode(
 	function(pos, node, puncher, pointed_thing)
-		if random()<=0.1 then
+		if random()<=0.2 then
 			alert(pos)
 		end
 	end
@@ -302,7 +262,9 @@ initial_properties = {
 		if mobkit.is_alive(self) then
 			
 			-- head seeking
+			--minetest.chat_send_all(dump(type(puncher)));
 			if type(puncher)=='userdata' and puncher:is_player() then
+				local weaponhit = string.find(puncher:get_wielded_item():get_name(), "rangedweapon");
 				local pp = puncher:get_pos()
 				pp.y = pp.y + puncher:get_properties().eye_height	-- pp is now camera pos
 				local pm, radius = get_head(self)
@@ -310,12 +272,12 @@ initial_properties = {
 				local head_dir = vector.subtract(pm,pp)
 				local dot = dot(look_dir,head_dir)
 				local p2 = {x=pp.x+look_dir.x*dot, y=pp.y+look_dir.y*dot, z=pp.z+look_dir.z*dot}
-				if vector.distance(pp,pm) <=2 then		-- a way to decrease punch range without dependences
+				-- minetest.chat_send_all(dump(vector.distance(pp, pm))..", "..dump(mobkit.isnear3d(pm,p2,radius*0.8)));
+				if vector.distance(pp,pm) <=2 or weaponhit then		-- a way to decrease punch range without dependences
 					if mobkit.isnear3d(pm,p2,radius*0.8) and
 					time_from_last_punch >= tool_caps.full_punch_interval-0.01 and
 					tool_caps.damage_groups.fleshy > 3 then			-- valid headshot
 						mobkit.make_sound(self,'headhit')
---						self.object:set_hp(99)
 						self.hp=0
 					else
 						mobkit.make_sound(self,'bodyhit')
@@ -339,62 +301,3 @@ initial_properties = {
 
 })
 
-minetest.register_entity("zombiestrd:shark",{
-											-- common props
-	physical = true,
-	stepheight = 0.1,				--EVIL!
-	collide_with_objects = true,
-	collisionbox = {-0.5, -0.3, -0.5, 0.5, 0.3, 0.5},
-	visual = "mesh",
-	mesh = "shark.b3d",
-	textures = {"shark3tex.png"},
-	visual_size = {x = 1.5, y = 1.5},
-	static_save = true,
-	makes_footstep_sound = true,
-	on_step = mobkit.stepfunc,	-- required
-	on_activate = mobkit.actfunc,		-- required
-	get_staticdata = mobkit.statfunc,
-											-- api props
-	springiness=0,
-	buoyancy = 0.98,					-- portion of hitbox submerged
-	max_speed = 5,
-	jump_height = 1.26,
-	view_range = 24,
---	lung_capacity = 0, 		-- seconds
-	max_hp = 20,
-	timeout=600,
-	attack={range=0.8,damage_groups={fleshy=7}},
-	sounds = {
-		attack='sharkattack',
-		},
-	animation = {
-		def={range={x=1,y=59},speed=40,loop=true},	
-		fast={range={x=1,y=59},speed=80,loop=true},
-		back={range={x=15,y=1},speed=-15,loop=false},
-		},
-	
-	brainfunc = shark_brain,
-	
-	on_punch=function(self, puncher, time_from_last_punch, tool_capabilities, dir)
-		if mobkit.is_alive(self) then
-			local hvel = vector.multiply(vector.normalize({x=dir.x,y=0,z=dir.z}),4)
-			self.object:set_velocity({x=hvel.x,y=2,z=hvel.z})
-			
-			mobkit.hurt(self,tool_capabilities.damage_groups.fleshy or 1)
-
-			if type(puncher)=='userdata' and puncher:is_player() then	-- if hit by a player
-				mobkit.clear_queue_high(self)							-- abandon whatever they've been doing
-				mobkit.hq_aqua_attack(self,20,puncher,6)				-- get revenge
-			end
-		end
-	end,
-})
-
---[[
-minetest.register_on_chat_message(
-	function(name, message)
-		if message == 'doit' then
-			minetest.chat_send_all(dump(minetest.registered_aliases.mapgen_water_source))
-		end
-	end
-)	--]]
